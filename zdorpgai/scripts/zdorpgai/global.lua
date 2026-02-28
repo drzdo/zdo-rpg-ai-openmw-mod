@@ -189,7 +189,9 @@ local function handleGetCharactersWhoHear(msg)
         return
     end
 
-    local hearingRangeSq = 2000 * 2000
+    local maxDistMeters = data.maxDistanceMeters or (2000 / 70)
+    local maxDistUnits = maxDistMeters * 70
+    local hearingRangeSq = maxDistUnits * maxDistUnits
     local characters = {}
     for id, npc in pairs(activeNpcs) do
         if id ~= characterId then
@@ -202,14 +204,14 @@ local function handleGetCharactersWhoHear(msg)
                     local dz = npcPos.z - speakerPos.z
                     local distSq = dx*dx + dy*dy + dz*dz
                     if distSq < hearingRangeSq then
-                        characters[#characters + 1] = { characterId = id, distance = math.sqrt(distSq) }
+                        characters[#characters + 1] = { characterId = id, distanceMeters = math.sqrt(distSq) / 70 }
                     end
                 end
             end
         end
     end
 
-    table.sort(characters, function(a, b) return a.distance < b.distance end)
+    table.sort(characters, function(a, b) return a.distanceMeters < b.distanceMeters end)
     respond('GetCharactersWhoHear', msg.id, { characters = characters })
 end
 
