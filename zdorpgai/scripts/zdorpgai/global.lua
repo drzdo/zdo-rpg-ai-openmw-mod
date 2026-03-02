@@ -551,15 +551,6 @@ local function onTargetChanged(data)
     })
 end
 
-local function onPlayerSpeaks(data)
-    publish('PlayerSpeaksText', {
-        playerId = data.playerId,
-        text = data.text,
-        targetCharacterId = data.targetNpcId,
-        gameTime = '0',
-    })
-end
-
 -------------------------------------------------------------------------------
 -- Save / Load
 -------------------------------------------------------------------------------
@@ -618,6 +609,5 @@ return {
     },
     eventHandlers = {
         ZdorpgTargetChanged = onTargetChanged,
-        ZdorpgPlayerSpeaks = onPlayerSpeaks,
     },
 }

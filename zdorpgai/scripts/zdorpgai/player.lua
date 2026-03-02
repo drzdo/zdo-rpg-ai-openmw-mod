@@ -1,67 +1,15 @@
 -- ZDORPG Player Script
 -- Handles raycasting for NPC target detection, voice playback, HUD speech
 
-local async = require('openmw.async')
 local camera = require('openmw.camera')
 local core = require('openmw.core')
-local input = require('openmw.input')
 local nearby = require('openmw.nearby')
 local self = require('openmw.self')
-local storage = require('openmw.storage')
 local types = require('openmw.types')
 local ui = require('openmw.ui')
 local util = require('openmw.util')
-local I = require('openmw.interfaces')
 
 local L = core.l10n('zdorpgai')
-
--------------------------------------------------------------------------------
--- Settings & input trigger registration
--------------------------------------------------------------------------------
-
-input.registerTrigger {
-    key = 'ZdorpgOpenChat',
-    l10n = 'zdorpgai',
-    name = 'trigger_open_chat',
-    description = 'trigger_open_chat_desc',
-}
-
-I.Settings.registerPage {
-    key = 'ZdorpgSettings',
-    l10n = 'zdorpgai',
-    name = 'settings_page_name',
-    description = 'settings_page_desc',
-}
-
-I.Settings.registerGroup {
-    key = 'SettingsZdorpgPlayer',
-    page = 'ZdorpgSettings',
-    l10n = 'zdorpgai',
-    name = 'settings_chat_group',
-    permanentStorage = true,
-    settings = {
-        {
-            key = 'textChatEnabled',
-            default = false,
-            renderer = 'checkbox',
-            name = 'settings_chat_enabled',
-            description = 'settings_chat_enabled_desc',
-        },
-        {
-            key = 'textChatKey',
-            default = 'Y',
-            renderer = 'inputBinding',
-            name = 'settings_chat_key',
-            description = 'settings_chat_key_desc',
-            argument = {
-                key = 'ZdorpgOpenChat',
-                type = 'trigger',
-            },
-        },
-    },
-}
-
-local playerSettings = storage.playerSection('SettingsZdorpgPlayer')
 
 -- State
 local TARGET_CHECK_FRAMES = 10
@@ -79,21 +27,6 @@ local speechAnimStart = nil
 local speechAnimRevealed = 0
 local speechAnimCharsPerSec = DEFAULT_CHARS_PER_SEC
 local speechAnimHoldDuration = nil  -- how long text stays after fully revealed
-
--- Chat text input state (press Y to type instead of mic)
-local chatActive = false
-local chatText = ''
-local chatElement = nil
-local chatHintElement = nil
-
--- Shift key mapping for US keyboard layout (symbol keys)
-local SHIFT_MAP = {
-    ['1'] = '!', ['2'] = '@', ['3'] = '#', ['4'] = '$', ['5'] = '%',
-    ['6'] = '^', ['7'] = '&', ['8'] = '*', ['9'] = '(', ['0'] = ')',
-    ['-'] = '_', ['='] = '+', ['['] = '{', [']'] = '}', ['\\'] = '|',
-    [';'] = ':', ["'"] = '"', [','] = '<', ['.'] = '>', ['/'] = '?',
-    ['`'] = '~',
-}
 
 --- Build table of byte offsets marking the end of each UTF-8 character.
 local function utf8CharOffsets(s)
@@ -166,14 +99,6 @@ local function destroyElements()
     if listeningElement then
         listeningElement:destroy()
         listeningElement = nil
-    end
-    if chatElement then
-        chatElement:destroy()
-        chatElement = nil
-    end
-    if chatHintElement then
-        chatHintElement:destroy()
-        chatHintElement = nil
     end
 end
 
@@ -297,139 +222,6 @@ local function hideListening()
 end
 
 -------------------------------------------------------------------------------
--- Chat text input (no-mic mode, press Y to open)
--------------------------------------------------------------------------------
-
-local function updateChatUI()
-    if chatElement then chatElement:destroy() end
-    if not chatActive then
-        chatElement = nil
-        return
-    end
-    chatElement = ui.create {
-        layer = 'HUD',
-        type = ui.TYPE.Text,
-        props = {
-            relativePosition = util.vector2(0.5, 1),
-            anchor = util.vector2(0.5, 1),
-            position = util.vector2(0, -40),
-            size = util.vector2(800, 24),
-            autoSize = false,
-            text = 'Say: ' .. chatText .. '_',
-            textSize = 16,
-            textColor = util.color.rgb(0.871, 0.867, 0.667),
-            textAlignH = ui.ALIGNMENT.Center,
-            textAlignV = ui.ALIGNMENT.End,
-        },
-    }
-end
-
-local function showChatHint()
-    if chatHintElement then chatHintElement:destroy() end
-    chatHintElement = ui.create {
-        layer = 'HUD',
-        type = ui.TYPE.Text,
-        props = {
-            relativePosition = util.vector2(0.5, 1),
-            anchor = util.vector2(0.5, 1),
-            position = util.vector2(0, -12),
-            size = util.vector2(800, 18),
-            autoSize = false,
-            text = 'Enter to send, Esc to cancel',
-            textSize = 14,
-            textColor = util.color.rgb(0.6, 0.6, 0.4),
-            textAlignH = ui.ALIGNMENT.Center,
-            textAlignV = ui.ALIGNMENT.End,
-        },
-    }
-end
-
-local function hideChatHint()
-    if chatHintElement then
-        chatHintElement:destroy()
-        chatHintElement = nil
-    end
-end
-
-local function setGameControls(enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.Controls, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.Fighting, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.Jumping, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.Looking, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.Magic, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.ViewMode, enabled)
-    input.setControlSwitch(input.CONTROL_SWITCH.VanityMode, enabled)
-end
-
-local function openChatInput()
-    if chatActive then return end
-    chatActive = true
-    chatText = ''
-    setGameControls(false)
-    showChatHint()
-    updateChatUI()
-end
-
--- Trigger handler: fired when the user presses the bound chat key
-input.registerTriggerHandler('ZdorpgOpenChat', async:callback(function()
-    if playerSettings:get('textChatEnabled') then
-        openChatInput()
-    end
-end))
-
-local function closeChatInput()
-    chatActive = false
-    chatText = ''
-    setGameControls(true)
-    hideChatHint()
-    updateChatUI()
-end
-
-local function submitChatInput()
-    if chatText ~= '' then
-        core.sendGlobalEvent('ZdorpgPlayerSpeaks', {
-            playerId = self.object.recordId,
-            text = chatText,
-            targetNpcId = lastTargetId,
-        })
-    end
-    closeChatInput()
-end
-
---- Remove the last UTF-8 character from a string.
-local function utf8RemoveLast(s)
-    if #s == 0 then return '' end
-    local i = #s
-    while i > 0 and string.byte(s, i) >= 0x80 and string.byte(s, i) < 0xC0 do
-        i = i - 1
-    end
-    return s:sub(1, i - 1)
-end
-
-local function onKeyPress(key)
-    if not chatActive then return end
-    if key.code == input.KEY.Enter or key.code == input.KEY.NP_Enter then
-        submitChatInput()
-    elseif key.code == input.KEY.Escape then
-        closeChatInput()
-    elseif key.code == input.KEY.Backspace then
-        chatText = utf8RemoveLast(chatText)
-        updateChatUI()
-    elseif key.symbol and key.symbol ~= '' then
-        local ch = key.symbol
-        if key.withShift and #ch == 1 then
-            if ch:match('[a-z]') then
-                ch = ch:upper()
-            elseif SHIFT_MAP[ch] then
-                ch = SHIFT_MAP[ch]
-            end
-        end
-        chatText = chatText .. ch
-        updateChatUI()
-    end
-end
-
--------------------------------------------------------------------------------
 -- Engine handlers
 -------------------------------------------------------------------------------
 
@@ -507,7 +299,6 @@ end
 -------------------------------------------------------------------------------
 
 local function onSave()
-    if chatActive then closeChatInput() end
     destroyElements()
     stopSpeechAnim()
     speechHideTime = nil
@@ -521,8 +312,6 @@ local function onLoad(data)
     if data then
         lastTargetId = data.lastTargetId
     end
-    chatActive = false
-    chatText = ''
     destroyElements()
     stopSpeechAnim()
     speechHideTime = nil
@@ -538,7 +327,6 @@ print('[ZDORPG] Player script loaded')
 return {
     engineHandlers = {
         onFrame = onFrame,
-        onKeyPress = onKeyPress,
         onSave = onSave,
         onLoad = onLoad,
     },
